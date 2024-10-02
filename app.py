@@ -5,6 +5,9 @@ import yfinance as yf
 import plotly.express as px
 
 st.title('Stock Dashboard')
-Ticker = st.sidebar.text_input('Ticker')
-Start_date = st.sidebar.date_input('Start_date')
-End_Date = st.sidebar.date_input('End_Date')
+ticker = st.sidebar.text_input('Ticker')
+start_date = st.sidebar.date_input('Start_date')
+end_date = st.sidebar.date_input('End_Date')
+
+data = yf.download(ticker,start =start_date,end = end_date)
+data
