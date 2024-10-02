@@ -9,5 +9,8 @@ ticker = st.sidebar.text_input('Ticker')
 start_date = st.sidebar.date_input('Start_date')
 end_date = st.sidebar.date_input('End_Date')
 
-data = yf.download(ticker,start =start_date,end = end_date)
+data = yf.download(ticker,start=start_date,end=end_date)
 data
+
+fig = px.line(data, x=data.index,y=data['Adj Close'],title = ticker)
+st.plotly_chart(fig)
