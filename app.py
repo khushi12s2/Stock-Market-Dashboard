@@ -18,7 +18,10 @@ st.plotly_chart(fig)
 pricing_data,fundamental_data,news=st.tabs(["Pricing Data","Fundamental Data","Top !0 News"]) 
 
 with pricing_data:
-    st.write("Price")
+    st.header('Price Movements')
+    data2 = data
+    data2['% Change'] = data['Adj Close']/data['Adj Close'].shift(1)
+    st.write(data2)
 
 with fundamental_data:
     st.write("Fundamental")
