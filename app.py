@@ -15,7 +15,7 @@ data
 fig = px.line(data, x=data.index,y=data['Adj Close'],title = ticker)
 st.plotly_chart(fig)
 
-pricing_data,fundamental_data,news=st.tabs(["Pricing Data","Fundamental Data","Top !0 News"]) 
+pricing_data,fundamental_data,news=st.tabs(["Pricing Data","Fundamental Data","Top 10 News"]) 
 
 with pricing_data:
     st.header('Price Movements')
@@ -25,6 +25,7 @@ with pricing_data:
     st.write(data2)
     annual_return = data2['% Change'].mean()*252*100
     st.write("Annual Return is:",annual_return,"%")
+    stdev = np.std(data2['% Change'])*np.sqrt(252)
 
 with fundamental_data:
     st.write("Fundamental")
