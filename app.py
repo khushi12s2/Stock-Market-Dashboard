@@ -14,3 +14,14 @@ data
 
 fig = px.line(data, x=data.index,y=data['Adj Close'],title = ticker)
 st.plotly_chart(fig)
+
+pricing_data,fundamental_data,news=st.tabs(["Pricing Data","Fundamental Data","Top !0 News"]) 
+
+with pricing_data:
+    st.write("Price")
+
+with fundamental_data:
+    st.write("Fundamental")
+
+with news:
+    st.write("News")
