@@ -21,7 +21,7 @@ with pricing_data:
     st.header('Price Movements')
     data2 = data
     data2['% Change'] = data['Adj Close']/data['Adj Close'].shift(1)-1
-    data2.dropnone(inplace = True)
+    data2.dropna(inplace = True)
     st.write(data2)
     annual_return = data2['% Change'].mean()*252*100
     st.write("Annual Return is:",annual_return,"%")
