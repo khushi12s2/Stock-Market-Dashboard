@@ -5,3 +5,4 @@ import yfinance as yf
 import plotly.express as px
 
 st.title('Stock Dashboard')
+st.sidebar.text_input('Ticker')
