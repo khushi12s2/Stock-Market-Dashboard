@@ -14,7 +14,7 @@ data
 
 fig1 = px.line(data, x=data.index,y=data['Adj Close'],title = ticker)
 st.plotly_chart(fig1)
-fig2 = px.iris(data, x=data.index,y=data['Adj Close'],title = ticker)
+fig2 = px.scatter(data, x=data.index,y=data['Adj Close'],title = ticker)
 st.plotly_chart(fig2)
 pricing_data,fundamental_data,news=st.tabs(["Pricing Data","Fundamental Data","Top 10 News"]) 
 
