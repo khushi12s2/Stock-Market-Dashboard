@@ -16,7 +16,25 @@ fig1 = px.line(data, x=data.index,y=data['Adj Close'],title = ticker)
 st.plotly_chart(fig1)
 fig2 = px.scatter(data, x=data.index,y=data['Adj Close'],title = ticker)
 st.plotly_chart(fig2)
-pricing_data,fundamental_data,news=st.tabs(["Pricing Data","Fundamental Data","Top 10 News"]) 
+pricing_data,fundamental_data,news=st.tabs(["Pricing Data","Fundamental Data","Financial Metrics","Top 10 News"]) 
+
+from alpha_vantage.fundamentaldata import FundamentalData
+
+api_key = 'IKR4UZYWX3XP0YGF'
+fd = FundamentalData(key=api_key, output_format='pandas')
+
+# Function to fetch financial metrics
+def get_financial_metrics(ticker):
+    balance_sheet, _ = fd.get_balance_sheet_annual(ticker)
+    income_statement, _ = fd.get_income_statement_annual(ticker)
+    
+    # Extract financial metrics
+    pe_ratio = balance_sheet.loc[0, 'pe_ratio']
+    eps = income_statement.loc[0, 'eps']
+    debt_to_equity = balance_sheet.loc[0, 'debt_equity_ratio']
+    
+    return pe_ratio, eps, debt_to_equity
+
 
 with pricing_data:
     st.header('Price Movements')
@@ -49,6 +67,23 @@ with fundamental_data:
     cf = cash_flow.T[2:]
     cf.columns = list(cash_flow.T.iloc[0])
     st.write(cf)
+
+st.subheader('Financial Metrics')
+
+if ticker:
+    try:
+        # Fetch and display metrics
+        pe_ratio, eps, debt_to_equity = get_financial_metrics(ticker)
+        market_cap, dividend_yield = get_yfinance_metrics(ticker)
+        
+        st.write(f"**P/E Ratio:** {pe_ratio}")
+        st.write(f"**EPS:** {eps}")
+        st.write(f"**Debt-to-Equity Ratio:** {debt_to_equity}")
+        st.write(f"**Market Cap:** ${market_cap:,.2f}")
+        st.write(f"**Dividend Yield:** {dividend_yield * 100}%")
+    except Exception as e:
+        st.error(f"Error fetching financial data: {e}")
+
 from stocknews import StockNews # type: ignore
 with news:
     st.header(f'News of {ticker}')
