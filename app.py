@@ -86,8 +86,7 @@ def fetch_portfolio_data(symbols, quantities):
         }
     return portfolio_data
 
-# Main dashboard section
-st.title('Stock Dashboard')
+
 # Existing stock fetching and charting code...
 
 # Portfolio Tracker Section
