@@ -12,9 +12,10 @@ end_date = st.sidebar.date_input('End_Date')
 data = yf.download(ticker,start=start_date,end=end_date)
 data
 
-fig = px.line(data, x=data.index,y=data['Adj Close'],title = ticker)
-st.plotly_chart(fig)
-
+fig1 = px.line(data, x=data.index,y=data['Adj Close'],title = ticker)
+st.plotly_chart(fig1)
+fig2 = px.iris(data, x=data.index,y=data['Adj Close'],title = ticker)
+st.plotly_chart(fig2)
 pricing_data,fundamental_data,news=st.tabs(["Pricing Data","Fundamental Data","Top 10 News"]) 
 
 with pricing_data:
