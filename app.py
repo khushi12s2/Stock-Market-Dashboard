@@ -1,8 +1,8 @@
-import streamlit as st
-import pandas as pd 
-import numpy as np 
-import yfinance as yf 
-import plotly.express as px
+import streamlit as st # type: ignore
+import pandas as pd  # type: ignore
+import numpy as np  # type: ignore
+import yfinance as yf  # type: ignore
+import plotly.express as px # type: ignore
 
 st.title('Stock Dashboard')
 ticker = st.sidebar.text_input('Ticker')
@@ -29,7 +29,7 @@ with pricing_data:
     st.write("Standard Deviation is:",stdev*100,"%")
     st.write("Risk Adj.Return is:",annual_return/(stdev*100))
 
-from alpha_vantage.fundamentaldata import FundamentalData
+from alpha_vantage.fundamentaldata import FundamentalData # type: ignore
 with fundamental_data:
     key = "IKR4UZYWX3XP0YGF"
     fd = FundamentalData(key,output_format="pandas")
@@ -48,7 +48,7 @@ with fundamental_data:
     cf = cash_flow.T[2:]
     cf.columns = list(cash_flow.T.iloc[0])
     st.write(cf)
-from stocknews import StockNews
+from stocknews import StockNews # type: ignore
 with news:
     st.header(f'News of {ticker}')
     sn = StockNews(ticker,save_news = False)
