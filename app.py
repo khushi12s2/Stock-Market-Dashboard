@@ -104,3 +104,46 @@ if portfolio_symbols and portfolio_quantities:
     st.write(f"### Total Portfolio Value: ${total_portfolio_value:.2f}")
 else:
     st.write("Please enter valid stock symbols and quantities.")
+
+
+from alpha_vantage.fundamentaldata import FundamentalData
+
+api_key = 'IKR4UZYWX3XP0YGF'
+fd = FundamentalData(key=api_key, output_format='pandas')
+
+# Function to fetch financial metrics
+def get_financial_metrics(ticker):
+    balance_sheet, _ = fd.get_balance_sheet_annual(ticker)
+    income_statement, _ = fd.get_income_statement_annual(ticker)
+    
+    # Extract financial metrics
+    pe_ratio = balance_sheet.loc[0, 'pe_ratio']
+    eps = income_statement.loc[0, 'eps']
+    debt_to_equity = balance_sheet.loc[0, 'debt_equity_ratio']
+    
+    return pe_ratio, eps, debt_to_equity
+
+def get_yfinance_metrics(ticker):
+    stock = yf.Ticker(ticker)
+    
+    market_cap = stock.info['marketCap']
+    dividend_yield = stock.info['dividendYield']
+    return market_cap, dividend_yield
+
+st.subheader('Financial Metrics')
+
+if ticker:
+    try:
+        # Fetch financial metrics from Alpha Vantage and yfinance
+        pe_ratio, eps, debt_to_equity = get_financial_metrics(ticker)
+        market_cap, dividend_yield = get_yfinance_metrics(ticker)
+        
+        # Display metrics
+        st.write(f"**P/E Ratio:** {pe_ratio}")
+        st.write(f"**EPS:** {eps}")
+        st.write(f"**Debt-to-Equity Ratio:** {debt_to_equity}")
+        st.write(f"**Market Cap:** ${market_cap:,.2f}")
+        st.write(f"**Dividend Yield:** {dividend_yield*100}%")
+    except Exception as e:
+        st.error(f"Error fetching financial data: {e}")
+
