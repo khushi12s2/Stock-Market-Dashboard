@@ -63,3 +63,44 @@ with news:
         st.write(f'Title Sentiment {title_sentiment}')
         news_sentiment = df_news['sentiment_summary'][i]
         st.write(f'News Sentiment {news_sentiment}')
+
+# Existing Code for Stock Dashboard ...
+
+# Sidebar Inputs for Portfolio Tracker
+st.sidebar.header('Portfolio Tracker')
+portfolio_symbols = st.sidebar.text_input('Enter stock symbols (comma-separated):', 'AAPL,GOOGL,TSLA')
+portfolio_quantities = st.sidebar.text_input('Enter quantities (comma-separated):', '10,5,2')
+
+# Function to fetch portfolio data
+def fetch_portfolio_data(symbols, quantities):
+    portfolio_data = {}
+    symbols_list = symbols.split(',')
+    quantities_list = list(map(float, quantities.split(',')))
+
+    for i, symbol in enumerate(symbols_list):
+        stock_data = yf.Ticker(symbol.strip()).history(period="1d")['Close'][0]
+        portfolio_data[symbol] = {
+            'price': stock_data,
+            'quantity': quantities_list[i],
+            'total_value': stock_data * quantities_list[i]
+        }
+    return portfolio_data
+
+# Main dashboard section
+st.title('Stock Dashboard')
+# Existing stock fetching and charting code...
+
+# Portfolio Tracker Section
+st.subheader('Portfolio Summary')
+
+if portfolio_symbols and portfolio_quantities:
+    portfolio_data = fetch_portfolio_data(portfolio_symbols, portfolio_quantities)
+
+    total_portfolio_value = 0
+    for stock, data in portfolio_data.items():
+        st.write(f"**{stock}:** Price: ${data['price']:.2f}, Quantity: {data['quantity']}, Total Value: ${data['total_value']:.2f}")
+        total_portfolio_value += data['total_value']
+
+    st.write(f"### Total Portfolio Value: ${total_portfolio_value:.2f}")
+else:
+    st.write("Please enter valid stock symbols and quantities.")
