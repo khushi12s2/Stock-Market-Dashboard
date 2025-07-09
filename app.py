@@ -3,151 +3,243 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime, timedelta
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+import statsmodels.api as sm
+import requests
+from io import BytesIO
+import matplotlib.pyplot as plt
+from fpdf import FPDF
+import sqlite3
 
-# === PAGE CONFIG ===
-st.set_page_config(page_title="📈 Stock & Portfolio Dashboard", layout="wide")
-st.title("📊 Stock Dashboard & Portfolio Tracker")
+st.set_page_config(page_title="Stock Dashboard", layout="wide")
 
-# === SIDEBAR ===
-st.sidebar.header("Stock Selection")
-ticker = st.sidebar.text_input("Enter Stock Ticker", "AAPL")
+# SQLite DB for caching
+conn = sqlite3.connect("stock_data.db")
+cursor = conn.cursor()
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS stock_cache (
+    ticker TEXT,
+    date TEXT,
+    close REAL,
+    PRIMARY KEY (ticker, date)
+)
+""")
+
+# THEME TOGGLE
+st.sidebar.header("Settings")
+theme_option = st.sidebar.selectbox("🎨 Theme Mode", ["Light", "Dark"])
+if theme_option == "Dark":
+    st.markdown("""
+        <style>
+        body, .stApp { background-color: #0e1117; color: white; }
+        .css-1v0mbdj, .css-1d391kg, .css-1cpxqw2, .css-1v3fvcr { color: white !important; }
+        .css-18e3th9 { background-color: #0e1117; }
+        </style>
+    """, unsafe_allow_html=True)
+
+refresh = st.sidebar.button("🔁 Refresh Data")
+st.title("📈 Stock Dashboard & Predictor")
+
+# CHART TYPE SWITCH
+chart_type = st.sidebar.radio("📊 Chart Type", ["Line", "Candlestick", "Area"])
+
+# EXPORT TO PDF
+save_pdf = st.sidebar.button("📋 Save Report as PDF")
+
+# SESSION CACHE
+@st.cache_resource(show_spinner=False)
+def fetch_data(ticker, start, end):
+    return yf.download(ticker, start=start, end=end)
+
+ticker_groups = {
+    "Tech": ["AAPL", "GOOGL", "MSFT"],
+    "Automotive": ["TSLA"],
+    "E-Commerce": ["AMZN"]
+}
+group_choice = st.sidebar.selectbox("Select Sector", list(ticker_groups.keys()), index=0)
+tickers = st.sidebar.multiselect("Select Tickers", ticker_groups[group_choice], default=[ticker_groups[group_choice][0]])
+
 start_date = st.sidebar.date_input("Start Date", datetime.now() - timedelta(days=365))
 end_date = st.sidebar.date_input("End Date", datetime.now())
 
-st.sidebar.header("Portfolio Tracker")
-portfolio_symbols = st.sidebar.text_input("Stock Symbols (comma-separated)", "AAPL,GOOGL,TSLA")
-portfolio_quantities = st.sidebar.text_input("Quantities (comma-separated)", "10,5,2")
+st.sidebar.markdown("---")
+show_rsi = st.sidebar.checkbox("Show RSI", True)
+show_macd = st.sidebar.checkbox("Show MACD/Signal", True)
+show_obv = st.sidebar.checkbox("Show OBV", True)
 
-# === FETCH STOCK DATA ===
-@st.cache_data(show_spinner=False)
-def fetch_stock_data(ticker, start, end):
-    try:
-        return yf.download(ticker, start=start, end=end)
-    except Exception as e:
-        st.error(f"❌ Error fetching stock data for {ticker}: {e}")
-        return pd.DataFrame()
+arima_toggle = st.sidebar.checkbox("🔁 Include ARIMA Forecast")
+rsiperiod = st.sidebar.slider("RSI Period", 5, 30, 14)
 
-data = fetch_stock_data(ticker, start_date, end_date)
+st.sidebar.markdown("---")
+if st.sidebar.button("⬇️ Download Data CSV"):
+    st.session_state.download_trigger = True
 
-# === PLOTTING CHARTS ===
-if not data.empty:
-    st.subheader(f"📈 {ticker} Price Charts")
+show_model_comparison = st.sidebar.checkbox("📊 Compare All Models", True)
+export_format = st.sidebar.multiselect("📤 Export Formats", ["CSV", "Excel", "JSON"], default=["CSV"])
 
-    plot_column = 'Adj Close' if 'Adj Close' in data.columns else 'Close'
-    st.write(f"Using `{plot_column}` for charts")
+all_comparison = pd.DataFrame()
 
-    # ✅ FIXED: ensure 1D Series with .squeeze()
-    fig1 = px.line(x=data.index, y=data[plot_column].squeeze(), title=f"{ticker} Price Trend")
-    st.plotly_chart(fig1, use_container_width=True)
+for ticker in tickers:
+    st.header(f"📊 {ticker} Stock Data")
+    data = fetch_data(ticker, start_date, end_date) if not refresh else yf.download(ticker, start=start_date, end=end_date)
 
-    fig2 = px.scatter(x=data.index, y=data[plot_column].squeeze(), title=f"{ticker} Price Scatter")
-    st.plotly_chart(fig2, use_container_width=True)
+    if not data.empty:
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = ['_'.join(col).strip() for col in data.columns.values]
 
-    # === TABS ===
-    pricing_data, fundamental_data, news = st.tabs(["💹 Pricing Data", "📊 Fundamental Data", "📰 Top 10 News"])
+        valid_cols = list(data.columns)
+        plot_column = next((col for col in valid_cols if 'Close' in col and ticker in col), None)
+        if not plot_column:
+            st.error(f"❌ Neither 'Adj Close' nor 'Close' found in columns: {valid_cols}")
+            st.stop()
 
-    with pricing_data:
-        st.header("Price Movements")
-        data2 = data.copy()
-        data2['% Change'] = data2[plot_column].pct_change()
-        data2.dropna(inplace=True)
-        st.dataframe(data2)
+        volume_col = next((col for col in valid_cols if 'Volume' in col and ticker in col), None)
+        if not volume_col:
+            st.error(f"❌ 'Volume' column not found in columns: {valid_cols}")
+            st.stop()
 
-        annual_return = data2['% Change'].mean() * 252 * 100
-        st.metric("Annual Return (%)", f"{annual_return:.2f}")
+        data['MA20'] = data[plot_column].rolling(window=20).mean()
+        data['MA50'] = data[plot_column].rolling(window=50).mean()
+        rolling_std = data[plot_column].rolling(window=20).std().squeeze()
+        data['BB_upper'] = data['MA20'] + 2 * rolling_std
+        data['BB_lower'] = data['MA20'] - 2 * rolling_std
 
-        stdev = data2['% Change'].std() * np.sqrt(252) * 100
-        st.metric("Volatility (Std Dev %)", f"{stdev:.2f}")
+        def compute_rsi(series, period=14):
+            delta = series.diff()
+            gain = np.where(delta > 0, delta, 0)
+            loss = np.where(delta < 0, -delta, 0)
+            avg_gain = pd.Series(gain.flatten(), index=series.index).rolling(window=period).mean()
+            avg_loss = pd.Series(loss.flatten(), index=series.index).rolling(window=period).mean()
+            rs = avg_gain / avg_loss
+            return 100 - (100 / (1 + rs))
 
-        if stdev != 0:
-            risk_adj_return = annual_return / stdev
-            st.metric("Risk-Adjusted Return", f"{risk_adj_return:.2f}")
-        else:
-            st.warning("⚠️ Standard deviation is 0. Risk-adjusted return cannot be calculated.")
+        data['RSI'] = compute_rsi(data[plot_column], period=rsiperiod)
+        data['EMA12'] = data[plot_column].ewm(span=12, adjust=False).mean()
+        data['EMA26'] = data[plot_column].ewm(span=26, adjust=False).mean()
+        data['MACD'] = data['EMA12'] - data['EMA26']
+        data['Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
 
-    with fundamental_data:
-        try:
-            from alpha_vantage.fundamentaldata import FundamentalData # type: ignore
-            key = "JGHJPATK0FJ8HUU2"  # Replace with your Alpha Vantage API key
-            st.header(f"Fundamental Data for {ticker}")
-            fd = FundamentalData(key, output_format="pandas")
+        obv = [0]
+        for i in range(1, len(data)):
+            curr = float(data[plot_column].iloc[i])
+            prev = float(data[plot_column].iloc[i - 1])
+            if curr > prev:
+                obv.append(obv[-1] + data[volume_col].iloc[i])
+            elif curr < prev:
+                obv.append(obv[-1] - data[volume_col].iloc[i])
+            else:
+                obv.append(obv[-1])
+        data['OBV'] = obv
 
-            st.subheader("Balance Sheet")
-            bs_raw = fd.get_balance_sheet_annual(ticker)[0]
-            bs = bs_raw.T[2:]
-            bs.columns = bs_raw.T.iloc[0]
-            st.dataframe(bs)
+        data['Buy_Signal'] = np.where((data['MACD'] > data['Signal']) & (data['RSI'] < 30), data[plot_column], np.nan)
+        data['Sell_Signal'] = np.where((data['MACD'] < data['Signal']) & (data['RSI'] > 70), data[plot_column], np.nan)
 
-            st.subheader("Income Statement")
-            is_raw = fd.get_income_statement_annual(ticker)[0]
-            is1 = is_raw.T[2:]
-            is1.columns = is_raw.T.iloc[0]
-            st.dataframe(is1)
+        if chart_type == "Line":
+            st.line_chart(data[[plot_column, 'MA20', 'MA50']])
+        elif chart_type == "Area":
+            fig_area = px.area(data, x=data.index, y=plot_column, title="Area Chart")
+            st.plotly_chart(fig_area)
+        elif chart_type == "Candlestick":
+            fig_candle = go.Figure(data=[go.Candlestick(x=data.index,
+                                                        open=data[f'Open_{ticker}'],
+                                                        high=data[f'High_{ticker}'],
+                                                        low=data[f'Low_{ticker}'],
+                                                        close=data[plot_column])])
+            fig_candle.add_trace(go.Scatter(x=data.index, y=data['Buy_Signal'], mode='markers', marker=dict(symbol='triangle-up', color='green'), name='Buy'))
+            fig_candle.add_trace(go.Scatter(x=data.index, y=data['Sell_Signal'], mode='markers', marker=dict(symbol='triangle-down', color='red'), name='Sell'))
+            fig_candle.update_layout(title='Candlestick Chart')
+            st.plotly_chart(fig_candle)
 
-            st.subheader("Cash Flow Statement")
-            cf_raw = fd.get_cash_flow_annual(ticker)[0]
-            cf = cf_raw.T[2:]
-            cf.columns = cf_raw.T.iloc[0]
-            st.dataframe(cf)
-        except Exception as e:
-            st.error(f"❌ Error fetching fundamental data: {e}")
+        if show_rsi:
+            st.line_chart(data[['RSI']])
+        if show_macd:
+            st.line_chart(data[['MACD', 'Signal']])
+        if show_obv:
+            st.line_chart(data[['OBV']])
 
-    with news:
-        try:
-            from stocknews import StockNews # type: ignore
-            st.header(f"Top News for {ticker}")
-            sn = StockNews(ticker, save_news=False)
-            df_news = sn.read_rss()
-            for i in range(min(10, len(df_news))):
-                st.subheader(f"📰 News {i + 1}")
-                st.write(df_news['published'][i])
-                st.write(df_news['title'][i])
-                st.write(df_news['summary'][i])
-                st.write(f"📌 Title Sentiment: {df_news['sentiment_title'][i]}")
-                st.write(f"🧠 News Sentiment: {df_news['sentiment_summary'][i]}")
-        except Exception as e:
-            st.error(f"❌ Error fetching news: {e}")
-else:
-    st.warning("⚠️ Please enter a valid ticker or date range to fetch stock data.")
+        if show_model_comparison:
+            st.subheader("📉 Model Comparison")
 
-# === PORTFOLIO TRACKER ===
-st.header("📦 Portfolio Summary")
+            lr_model = LinearRegression()
+            X = np.arange(len(data)).reshape(-1, 1)
+            y = data[plot_column].values
+            lr_model.fit(X, y)
+            preds_lr = lr_model.predict(X)
+            data['LR_Prediction'] = preds_lr
+            st.line_chart(data[['LR_Prediction']])
+            all_comparison[ticker+'_LR'] = pd.Series(preds_lr.flatten(), index=data.index)
 
-@st.cache_data(show_spinner=False)
-def fetch_portfolio_prices(symbols_list):
-    try:
-        df = yf.download(tickers=" ".join(symbols_list), period="1d")['Close']
-        return df.iloc[0] if isinstance(df, pd.DataFrame) else df
-    except Exception as e:
-        st.error(f"❌ Error fetching portfolio prices: {e}")
-        return {}
+            scaled_data = MinMaxScaler().fit_transform(y.reshape(-1, 1))
+            X_lstm, y_lstm = [], []
+            for i in range(60, len(scaled_data)):
+                X_lstm.append(scaled_data[i-60:i, 0])
+                y_lstm.append(scaled_data[i, 0])
 
-def get_portfolio_summary(symbols, quantities):
-    symbols_list = [s.strip().upper() for s in symbols.split(',')]
-    quantities_list = list(map(float, quantities.split(',')))
-    prices = fetch_portfolio_prices(symbols_list)
+            if len(X_lstm) > 0:
+                X_lstm, y_lstm = np.array(X_lstm), np.array(y_lstm)
+                X_lstm = np.reshape(X_lstm, (X_lstm.shape[0], X_lstm.shape[1], 1))
 
-    summary = []
-    total_value = 0
-    for i, symbol in enumerate(symbols_list):
-        price = prices[symbol] if symbol in prices else 0
-        value = price * quantities_list[i]
-        total_value += value
-        summary.append({
-            'Symbol': symbol,
-            'Price': round(price, 2),
-            'Quantity': quantities_list[i],
-            'Total Value': round(value, 2)
-        })
-    return summary, total_value
+                lstm_model = Sequential()
+                lstm_model.add(LSTM(units=50, return_sequences=True, input_shape=(X_lstm.shape[1], 1)))
+                lstm_model.add(Dropout(0.2))
+                lstm_model.add(LSTM(units=50))
+                lstm_model.add(Dropout(0.2))
+                lstm_model.add(Dense(1))
+                lstm_model.compile(optimizer='adam', loss='mean_squared_error')
+                lstm_model.fit(X_lstm, y_lstm, epochs=3, batch_size=32, verbose=0)
 
-if portfolio_symbols and portfolio_quantities:
-    try:
-        summary, total = get_portfolio_summary(portfolio_symbols, portfolio_quantities)
-        st.dataframe(pd.DataFrame(summary))
-        st.success(f"✅ Total Portfolio Value: ${total:,.2f}")
-    except Exception as e:
-        st.error(f"❌ Portfolio error: {e}")
-else:
-    st.warning("⚠️ Please enter valid stock symbols and quantities.")
+                predicted_lstm = lstm_model.predict(X_lstm)
+                predicted_lstm = MinMaxScaler().fit(y.reshape(-1, 1)).inverse_transform(predicted_lstm)
+                lstm_series = pd.Series(predicted_lstm.flatten(), index=data.index[-len(predicted_lstm):])
+                st.line_chart(pd.DataFrame({"LSTM Prediction": lstm_series}))
+                all_comparison[ticker+'_LSTM'] = lstm_series
+            else:
+                st.warning("📉 Not enough data to train LSTM (requires > 60 rows).")
+
+            if arima_toggle:
+                try:
+                    arima_model = sm.tsa.ARIMA(data[plot_column], order=(5, 1, 0))
+                    arima_result = arima_model.fit()
+                    forecast = arima_result.forecast(steps=10)
+                    st.line_chart(pd.DataFrame({"ARIMA Forecast": forecast}, index=pd.date_range(start=data.index[-1], periods=10, freq='D')))
+                except Exception as e:
+                    st.warning(f"ARIMA model error: {e}")
+
+        if export_format:
+            if "Excel" in export_format:
+                excel_bytes = BytesIO()
+                data.to_excel(excel_bytes, index=True)
+                st.download_button("📥 Export Excel", data=excel_bytes.getvalue(), file_name=f"{ticker}_data.xlsx")
+            if "JSON" in export_format:
+                st.download_button("📥 Export JSON", data=data.to_json().encode('utf-8'), file_name=f"{ticker}_data.json")
+            if "CSV" in export_format:
+                st.download_button("📥 Export CSV", data=data.to_csv().encode('utf-8'), file_name=f"{ticker}_data.csv")
+
+        if save_pdf:
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
+            pdf.cell(200, 10, txt=f"Stock Summary Report: {ticker}", ln=True, align='C')
+            for i, row in data.tail(10).iterrows():
+                pdf.cell(200, 8, txt=f"{i.date()} | Close: {row[plot_column]:.2f} | RSI: {row['RSI']:.2f}", ln=True)
+            pdf_bytes = BytesIO()
+            pdf.output(pdf_bytes)
+            st.download_button("📋 Download PDF Report", data=pdf_bytes.getvalue(), file_name=f"{ticker}_report.pdf")
+
+if not all_comparison.empty:
+    st.subheader("📊 Multi-Ticker Model Comparison")
+    st.line_chart(all_comparison.dropna())
+if 'download_trigger' in st.session_state and st.session_state.download_trigger:
+    for ticker in tickers:
+        data = fetch_data(ticker, start_date, end_date)
+        if not data.empty:
+            data.to_csv(f"{ticker}_data.csv")
+            st.success(f"✅ {ticker} data downloaded as CSV.")
+    st.session_state.download_trigger = False   
